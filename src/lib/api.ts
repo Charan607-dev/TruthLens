@@ -1,5 +1,15 @@
 const TOKEN_KEY = 'truthlens_auth_token';
 
+const RAW_API_BASE = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return RAW_API_BASE ? `${RAW_API_BASE}${normalizedPath}` : normalizedPath;
+}
+
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -25,7 +35,7 @@ export async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     ...options,
     headers,
   });

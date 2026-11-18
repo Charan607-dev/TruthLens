@@ -18,6 +18,7 @@ import { ConfidenceGauge } from '../components/ConfidenceGauge';
 import { HeroIntelligenceVisual } from '../components/HeroIntelligenceVisual';
 import { PredictionBadge } from '../components/PredictionBadge';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../lib/api';
 import { MlPredictionResult } from '../types';
 
 interface PublicModelRow {
@@ -87,7 +88,7 @@ export function LandingPage() {
     setDemoLoading(true);
     setDemoError(null);
     try {
-      const res = await fetch('/api/public/demo-analyze', {
+      const res = await fetch(apiUrl('/api/public/demo-analyze'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: inputText }),
@@ -103,7 +104,7 @@ export function LandingPage() {
   };
 
   useEffect(() => {
-    fetch('/api/public/model-metrics')
+    fetch(apiUrl('/api/public/model-metrics'))
       .then((r) => r.json())
       .then((d) => setModelMetrics({ active_model: d.active_model, models: d.models || [] }))
       .catch(() => {});

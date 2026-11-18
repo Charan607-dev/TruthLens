@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, KeyRound, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../lib/api';
 import { apiRequest } from '../lib/api';
 
 function AuthShell({
@@ -75,7 +76,7 @@ export function LoginPage() {
   const [googleInfo, setGoogleInfo] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/google-status')
+    fetch(apiUrl('/api/auth/google-status'))
       .then((r) => r.json())
       .then((d) => setGoogleInfo(d.message))
       .catch(() => {});
