@@ -896,9 +896,12 @@ export function trainModelPipeline(params: {
 }
 
 export function loadModelArtifact(artifactPath: string): TrainedModelArtifact {
+  const modelsRoot = process.env.DATA_DIR
+    ? path.resolve(process.env.DATA_DIR, 'models')
+    : path.resolve(process.cwd(), 'data', 'models');
   const candidatePath = fs.existsSync(artifactPath)
     ? artifactPath
-    : path.resolve(process.cwd(), 'data', 'models', path.basename(artifactPath));
+    : path.join(modelsRoot, path.basename(artifactPath));
 
   if (!fs.existsSync(candidatePath)) {
     throw new Error(`Model artifact file not found at ${artifactPath}`);

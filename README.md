@@ -65,16 +65,23 @@ python app.py
 
 ---
 
-## Deployment Guide
+## Deployment Guide (Render)
 
-### 1. Database (Supabase)
-- Create a Supabase project and execute `supabase/migrations/001_initial_schema.sql` in the SQL Editor.
-- Enable Email/Password (and optionally Google OAuth) under **Authentication → Providers**.
+### 1. Backend Web Service (Node.js 22+ / Express — `server.ts`)
+- **Root Directory**: `.` (repository root)
+- **Build Command**: `npm ci`
+- **Start Command**: `npm start`
+- **Health Check Path**: `/health`
+- **Environment Variables**:
+  - `NODE_ENV=production`
+  - `JWT_SECRET=<long-random-hex>`
+  - `ALLOWED_ORIGINS=https://<your-frontend-domain>.onrender.com`
+  - `GEMINI_API_KEY=<optional-key>`
 
-### 2. Backend (Render / Railway)
-- Deploy `/backend` using `render.yaml` (`gunicorn app:app`).
-- Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `ALLOWED_ORIGINS`.
+### 2. Frontend Static Site (React + Vite)
+- **Build Command**: `npm ci && npm run build`
+- **Publish Directory**: `dist`
+- **Environment Variable**: `VITE_API_URL=https://<your-backend-domain>.onrender.com`
+- **Note**: Because Vite embeds `VITE_*` variables at build time, rebuild the Static Site after adding or changing `VITE_API_URL`.
 
-### 3. Frontend (Vercel)
-- Connect the repository to Vercel (`npm run build`, output `dist`).
-- Update the API destination URL in `vercel.json` to point to your Render/Railway backend URL.
+*(Alternatively, deploy as a single unified Node Web Service with Build Command `npm ci && npm run build`, Start Command `npm start`, and `VITE_API_URL` left empty.)*

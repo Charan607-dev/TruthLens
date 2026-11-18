@@ -107,7 +107,11 @@ async function startServer() {
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((o) => o.trim().replace(/\/+$/, ''))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((o) => {
+      if (o === '*' || /^https?:\/\//i.test(o)) return o;
+      return `https://${o}`;
+    });
 
   app.use((req, res, next) => {
     const origin = (req.headers.origin || '').replace(/\/+$/, '');
@@ -118,7 +122,7 @@ async function startServer() {
       res.setHeader('Vary', 'Origin');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
     res.setHeader('Access-Control-Max-Age', '86400');
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
@@ -136,22 +140,33 @@ async function startServer() {
     next();
   });
 
-  // Health endpoint
-  app.get('/api/health', (_req, res) => {
-    const activeModel = db
-      .prepare('SELECT id, model_name, version, trained_at FROM model_versions WHERE status = ? LIMIT 1')
-      .get('active') as { id: string; model_name: string; version: string; trained_at: string } | undefined;
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      database: 'connected',
-      ml_model_active: Boolean(activeModel),
-      active_model: activeModel || null,
-      fact_check_grounding: Boolean(
-        process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
-      ),
-    });
-  });
+  // Health endpoints (/health for Render platform checks + /api/health for frontend/clients)
+  const sendHealth = (_req: Request, res: Response) => {
+    try {
+      const activeModel = db
+        .prepare('SELECT id, model_name, version, trained_at FROM model_versions WHERE status = ? LIMIT 1')
+        .get('active') as { id: string; model_name: string; version: string; trained_at: string } | undefined;
+      res.json({
+        status: 'healthy',
+        service: 'TruthLens AI Backend API',
+        timestamp: new Date().toISOString(),
+        database: 'connected',
+        ml_model_active: Boolean(activeModel),
+        active_model: activeModel || null,
+        fact_check_grounding: Boolean(
+          process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
+        ),
+      });
+    } catch (err) {
+      res.status(500).json({
+        status: 'unhealthy',
+        service: 'TruthLens AI Backend API',
+        error: err instanceof Error ? err.message : 'Database health check failed.',
+      });
+    }
+  };
+  app.get('/health', sendHealth);
+  app.get('/api/health', sendHealth);
 
   // Public metrics endpoint for Landing Page (strictly real DB evaluation metrics)
   app.get('/api/public/model-metrics', (_req, res) => {
@@ -1169,30 +1184,54 @@ async function startServer() {
     res.status(400).json({ error: err.message || 'Unexpected server error.' });
   });
 
-  // Vite middleware in development, static dist serving in production
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite middleware in development, static dist or API-root JSON in production
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    (process.env.RENDER === 'true' && process.env.NODE_ENV !== 'development');
+
+  const distPath = path.resolve(process.cwd(), 'dist');
+  const indexPath = path.join(distPath, 'index.html');
+  const hasFrontendDist = fs.existsSync(indexPath) && process.env.SERVE_FRONTEND !== 'false';
+
+  const sendRootInfo = (_req: Request, res: Response) => {
+    res.json({
+      service: 'TruthLens AI Backend API',
+      status: 'running',
+      version: '2.0.0',
+      endpoints: {
+        health: '/health',
+        api_health: '/api/health',
+      },
+    });
+  };
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+  } else if (hasFrontendDist) {
+    app.get('/', (req, res) => {
+      const accept = String(req.headers.accept || '');
+      if (accept.includes('application/json') && !accept.includes('text/html')) {
+        return sendRootInfo(req, res);
+      }
+      return res.sendFile(indexPath);
+    });
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(indexPath);
+    });
   } else {
-    const distPath = path.resolve(process.cwd(), 'dist');
-    const indexPath = path.join(distPath, 'index.html');
-    if (fs.existsSync(indexPath)) {
-      app.use(express.static(distPath));
-      app.get('*', (_req, res) => {
-        res.sendFile(indexPath);
+    app.get('/', sendRootInfo);
+    app.all('*', (_req, res) => {
+      res.status(404).json({
+        error: 'Endpoint not found.',
+        service: 'TruthLens AI Backend API',
+        health: '/health',
       });
-    } else {
-      app.get('*', (_req, res) => {
-        res.json({
-          service: 'TruthLens AI Backend API',
-          status: 'running',
-          health: '/api/health',
-        });
-      });
-    }
+    });
   }
 
   const PORT = Number(process.env.PORT) || 3000;

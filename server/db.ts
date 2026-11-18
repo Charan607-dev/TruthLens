@@ -5,7 +5,9 @@ import path from 'path';
 import { ensureSeedDatasetCsv } from './data/seedDataset.ts';
 import { trainModelPipeline, validateAndParseCsv } from './ml/engine.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'truthlens.db');
 export const DATASETS_DIR = path.join(DATA_DIR, 'datasets');
 export const MODELS_DIR = path.join(DATA_DIR, 'models');
@@ -237,7 +239,9 @@ function seedInitialData(db: DatabaseSync) {
   const activeModelRow = db
     .prepare('SELECT id, artifact_path FROM model_versions WHERE status = ? LIMIT 1')
     .get('active') as { id: string; artifact_path: string } | undefined;
-  const activeArtifactMissing = activeModelRow && !fs.existsSync(activeModelRow.artifact_path);
+  const resolveArtifactExists = (artifactPath: string) =>
+    fs.existsSync(artifactPath) || fs.existsSync(path.join(MODELS_DIR, path.basename(artifactPath)));
+  const activeArtifactMissing = activeModelRow && !resolveArtifactExists(activeModelRow.artifact_path);
 
   if (datasetCountRow.c === 0 || activeArtifactMissing || !activeModelRow) {
     const csvPath = ensureSeedDatasetCsv(DATASETS_DIR);
@@ -272,7 +276,7 @@ function seedInitialData(db: DatabaseSync) {
         .prepare('SELECT id, artifact_path FROM model_versions')
         .all() as Array<{ id: string; artifact_path: string }>;
       for (const m of allModels) {
-        if (!fs.existsSync(m.artifact_path)) {
+        if (!resolveArtifactExists(m.artifact_path)) {
           db.prepare('DELETE FROM model_versions WHERE id = ?').run(m.id);
         }
       }

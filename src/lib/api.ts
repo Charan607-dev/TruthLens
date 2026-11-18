@@ -15,7 +15,20 @@ function normalizeApiBase(raw: string): string {
   return `https://${trimmed}`;
 }
 
-const API_BASE = normalizeApiBase(import.meta.env.VITE_API_URL || '');
+function resolveApiBase(): string {
+  const normalized = normalizeApiBase(import.meta.env.VITE_API_URL || '');
+  if (
+    import.meta.env.PROD &&
+    typeof window !== 'undefined' &&
+    !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(normalized)
+  ) {
+    return '';
+  }
+  return normalized;
+}
+
+const API_BASE = resolveApiBase();
 
 export function apiUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {

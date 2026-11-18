@@ -4,12 +4,10 @@ services:
     runtime: node
     buildCommand: npm ci
     startCommand: npm start
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "3000"
       - key: JWT_SECRET
         generateValue: true
       - key: ALLOWED_ORIGINS
