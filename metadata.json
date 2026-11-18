@@ -1,0 +1,8 @@
+{
+  "name": "TruthLens AI",
+  "description": "AI-powered fake news detection, explainable NLP attribution, source credibility analysis, and verification platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
