@@ -101,15 +101,16 @@ async function startServer() {
   const db = getDb();
 
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '2mb' }));
 
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map((o) => o.trim())
+    .map((o) => o.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 
   app.use((req, res, next) => {
-    const origin = req.headers.origin;
+    const origin = (req.headers.origin || '').replace(/\/+$/, '');
     if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
       res.setHeader('Access-Control-Allow-Origin', '*');
     } else if (origin && allowedOrigins.includes(origin)) {
@@ -118,6 +119,7 @@ async function startServer() {
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
     }
@@ -205,68 +207,86 @@ async function startServer() {
 
   // ================= AUTHENTICATION =================
   app.post('/api/auth/register', rateLimit(15, 60_000), (req, res) => {
-    const fullName = String(req.body?.full_name || '').trim();
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
+    try {
+      const fullName = String(req.body?.full_name || '').trim();
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '');
 
-    if (fullName.length < 2) {
-      return res.status(400).json({ error: 'Full name must be at least 2 characters.' });
+      if (fullName.length < 2) {
+        return res.status(400).json({ error: 'Full name must be at least 2 characters.' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+      }
+      if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+      }
+
+      const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      if (existing) {
+        return res.status(409).json({ error: 'An account with this email already exists.' });
+      }
+
+      const id = crypto.randomUUID();
+      const passwordHash = hashPassword(password);
+      db.prepare('INSERT INTO users (id, full_name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(
+        id,
+        fullName,
+        email,
+        passwordHash,
+        'user'
+      );
+
+      const user = db
+        .prepare('SELECT id, full_name, email, role, created_at FROM users WHERE id = ?')
+        .get(id) as unknown as AuthUser | undefined;
+      if (!user) {
+        console.error('[AUTH] Registration insert succeeded but user lookup returned empty');
+        return res.status(500).json({ error: 'User profile creation failed. Please try again.' });
+      }
+
+      const token = signToken({ sub: user.id, email: user.email, role: user.role });
+      return res.status(201).json({ token, user });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unexpected registration error';
+      console.error('[AUTH] Registration error:', msg);
+      if (msg.toLowerCase().includes('unique')) {
+        return res.status(409).json({ error: 'An account with this email already exists.' });
+      }
+      return res.status(500).json({ error: 'Registration service encountered a database error. Please retry.' });
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Please enter a valid email address.' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
-    }
-
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) {
-      return res.status(409).json({ error: 'An account with this email already exists.' });
-    }
-
-    const id = crypto.randomUUID();
-    const passwordHash = hashPassword(password);
-    db.prepare('INSERT INTO users (id, full_name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(
-      id,
-      fullName,
-      email,
-      passwordHash,
-      'user'
-    );
-
-    const user = db
-      .prepare('SELECT id, full_name, email, role, created_at FROM users WHERE id = ?')
-      .get(id) as unknown as AuthUser;
-    const token = signToken({ sub: user.id, email: user.email, role: user.role });
-
-    res.status(201).json({ token, user });
   });
 
   app.post('/api/auth/login', rateLimit(20, 60_000), (req, res) => {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '');
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required.' });
+      }
+
+      const row = db
+        .prepare('SELECT id, full_name, email, password_hash, role, created_at FROM users WHERE email = ?')
+        .get(email) as (AuthUser & { password_hash: string }) | undefined;
+
+      if (!row || !verifyPassword(password, row.password_hash)) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const user: AuthUser = {
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        role: row.role,
+        created_at: row.created_at,
+      };
+      const token = signToken({ sub: user.id, email: user.email, role: user.role });
+      return res.json({ token, user });
+    } catch (err) {
+      console.error('[AUTH] Login error:', err instanceof Error ? err.message : 'Unexpected login error');
+      return res.status(500).json({ error: 'Authentication service encountered an error. Please retry.' });
     }
-
-    const row = db
-      .prepare('SELECT id, full_name, email, password_hash, role, created_at FROM users WHERE email = ?')
-      .get(email) as (AuthUser & { password_hash: string }) | undefined;
-
-    if (!row || !verifyPassword(password, row.password_hash)) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
-    }
-
-    const user: AuthUser = {
-      id: row.id,
-      full_name: row.full_name,
-      email: row.email,
-      role: row.role,
-      created_at: row.created_at,
-    };
-    const token = signToken({ sub: user.id, email: user.email, role: user.role });
-    res.json({ token, user });
   });
 
   app.get('/api/auth/google-status', (_req, res) => {

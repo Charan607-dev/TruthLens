@@ -1,12 +1,18 @@
 const TOKEN_KEY = 'truthlens_auth_token';
 
 function normalizeApiBase(raw: string): string {
-  const trimmed = raw.trim().replace(/\/+$/, '');
+  const trimmed = raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
   if (!trimmed) return '';
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  // Support bare hostnames from Render Blueprint fromService (`property: host`)
-  if (trimmed.includes('.')) return `https://${trimmed}`;
-  return trimmed;
+  if (trimmed.startsWith('/')) return trimmed;
+  // Support Render Blueprint `fromService` `property: host` (slug without domain or domain without scheme)
+  if (!trimmed.includes('.')) {
+    return trimmed === 'localhost' ? 'http://localhost:3000' : `https://${trimmed}.onrender.com`;
+  }
+  return `https://${trimmed}`;
 }
 
 const API_BASE = normalizeApiBase(import.meta.env.VITE_API_URL || '');
@@ -62,12 +68,13 @@ export async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
+  const targetUrl = apiUrl(path);
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
-    res = await fetch(apiUrl(path), {
+    res = await fetch(targetUrl, {
       ...options,
       headers,
       signal: options.signal ?? controller.signal,
@@ -75,12 +82,14 @@ export async function apiRequest<T>(
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new ApiError(
-        'Request timed out while waiting for the TruthLens backend. Please retry in a moment.',
+        'Request timed out while waiting for the TruthLens backend. If your Render backend is waking up from sleep, retry in a few seconds.',
         408
       );
     }
     throw new ApiError(
-      'Unable to reach the TruthLens backend API. Check your network connection or verify VITE_API_URL.',
+      API_BASE
+        ? `Unable to reach the TruthLens backend at ${API_BASE}. Verify the backend service is running and CORS allows this origin.`
+        : 'Unable to reach the TruthLens backend API. Check your network connection or set VITE_API_URL.',
       0
     );
   } finally {
@@ -97,7 +106,9 @@ export async function apiRequest<T>(
     trimmedText.startsWith('<html')
   ) {
     throw new ApiError(
-      'Backend API returned HTML instead of JSON. Ensure VITE_API_URL is configured to your live TruthLens backend service.',
+      API_BASE
+        ? `Backend request (${targetUrl}) returned HTML (HTTP ${res.status}) instead of JSON. Check that VITE_API_URL points to the Node.js TruthLens server.`
+        : 'Received HTML instead of API JSON. If deployed as a Render Static Site, set VITE_API_URL to your deployed backend URL and redeploy.',
       res.status || 502
     );
   }
@@ -110,7 +121,7 @@ export async function apiRequest<T>(
       if (!res.ok) {
         throw new ApiError(`Server error (${res.status}): ${trimmedText.slice(0, 140)}`, res.status);
       }
-      throw new ApiError('Backend returned an invalid JSON response.', res.status);
+      throw new ApiError('Backend returned malformed JSON.', res.status);
     }
   }
 
@@ -118,12 +129,19 @@ export async function apiRequest<T>(
     const message =
       typeof parsed === 'object' && parsed !== null && 'error' in parsed
         ? String((parsed as { error: unknown }).error)
-        : `Request failed with HTTP status ${res.status}.`;
+        : !API_BASE && import.meta.env.PROD
+          ? `Backend endpoint not found (HTTP ${res.status}). Set VITE_API_URL on the Render Static Site to your backend URL and rebuild.`
+          : `Request failed with HTTP status ${res.status}.`;
     throw new ApiError(message, res.status);
   }
 
   if (parsed === null) {
-    throw new ApiError('Backend returned an empty JSON response.', res.status);
+    throw new ApiError(
+      !API_BASE && import.meta.env.PROD
+        ? `No backend API response received (HTTP ${res.status}, empty body). Your Static Site received the request without forwarding it to a backend — set VITE_API_URL to your deployed TruthLens backend URL and rebuild.`
+        : `Backend at ${targetUrl} returned an empty response (HTTP ${res.status}). Check your Render backend service logs and health endpoint.`,
+      res.status
+    );
   }
 
   return parsed as T;

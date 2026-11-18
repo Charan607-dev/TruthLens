@@ -20,15 +20,24 @@ services:
   - type: web
     name: truthlens-ai-frontend
     runtime: static
-    buildCommand: npm ci && npm run build
+    buildCommand: |
+      if [ -z "$VITE_API_URL" ] && [ -n "$BACKEND_HOST" ]; then
+        case "$BACKEND_HOST" in
+          *.onrender.com) export VITE_API_URL="https://$BACKEND_HOST" ;;
+          *) export VITE_API_URL="https://$BACKEND_HOST.onrender.com" ;;
+        esac
+      fi
+      npm ci && npm run build
     staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
-      - key: VITE_API_URL
+      - key: BACKEND_HOST
         fromService:
           type: web
           name: truthlens-ai-backend
           property: host
+      - key: VITE_API_URL
+        sync: false
