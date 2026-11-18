@@ -67,21 +67,19 @@ python app.py
 
 ## Deployment Guide (Render)
 
-### 1. Backend Web Service (Node.js 22+ / Express — `server.ts`)
-- **Root Directory**: `.` (repository root)
-- **Build Command**: `npm ci`
+### Option A: Python Flask Backend (`backend/app.py`) + Frontend Static Site
+- **Backend Web Service (Python)**:
+  - **Root Directory**: `backend` (or `.` using `backend.app:app`)
+  - **Build Command**: `pip install -r requirements.txt` (or `pip install -r backend/requirements.txt` if Root Directory is `.`)
+  - **Start Command**: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120` (or `gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120` if Root Directory is `.`)
+  - **Health Check Path**: `/health`
+  - **Environment Variables**: `ALLOWED_ORIGINS`, `JWT_SECRET`, optional `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `GEMINI_API_KEY`
+- **Frontend Static Site**:
+  - **Build Command**: `npm ci && npm run build`
+  - **Publish Directory**: `dist`
+  - **Environment Variable**: `VITE_API_URL=https://<your-backend-domain>.onrender.com`
+
+### Option B: Node.js 22+ Express Backend (`server.ts`)
+- **Build Command**: `npm ci` (or `npm ci && npm run build` for unified single-service hosting)
 - **Start Command**: `npm start`
 - **Health Check Path**: `/health`
-- **Environment Variables**:
-  - `NODE_ENV=production`
-  - `JWT_SECRET=<long-random-hex>`
-  - `ALLOWED_ORIGINS=https://<your-frontend-domain>.onrender.com`
-  - `GEMINI_API_KEY=<optional-key>`
-
-### 2. Frontend Static Site (React + Vite)
-- **Build Command**: `npm ci && npm run build`
-- **Publish Directory**: `dist`
-- **Environment Variable**: `VITE_API_URL=https://<your-backend-domain>.onrender.com`
-- **Note**: Because Vite embeds `VITE_*` variables at build time, rebuild the Static Site after adding or changing `VITE_API_URL`.
-
-*(Alternatively, deploy as a single unified Node Web Service with Build Command `npm ci && npm run build`, Start Command `npm start`, and `VITE_API_URL` left empty.)*
