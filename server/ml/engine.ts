@@ -896,10 +896,14 @@ export function trainModelPipeline(params: {
 }
 
 export function loadModelArtifact(artifactPath: string): TrainedModelArtifact {
-  if (!fs.existsSync(artifactPath)) {
+  const candidatePath = fs.existsSync(artifactPath)
+    ? artifactPath
+    : path.resolve(process.cwd(), 'data', 'models', path.basename(artifactPath));
+
+  if (!fs.existsSync(candidatePath)) {
     throw new Error(`Model artifact file not found at ${artifactPath}`);
   }
-  const raw = fs.readFileSync(artifactPath, 'utf8');
+  const raw = fs.readFileSync(candidatePath, 'utf8');
   return JSON.parse(raw) as TrainedModelArtifact;
 }
 

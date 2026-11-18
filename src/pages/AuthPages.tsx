@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, KeyRound, Shield } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, KeyRound, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { apiUrl } from '../lib/api';
 import { apiRequest } from '../lib/api';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function AuthShell({
   title,
@@ -72,23 +73,38 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleInfo, setGoogleInfo] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(apiUrl('/api/auth/google-status'))
-      .then((r) => r.json())
-      .then((d) => setGoogleInfo(d.message))
+    apiRequest<{ message?: string }>('/api/auth/google-status')
+      .then((d) => {
+        if (d?.message) setGoogleInfo(d.message);
+      })
       .catch(() => {});
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
+
+    const trimmedEmail = email.trim();
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your account password.');
+      return;
+    }
+
     setLoading(true);
     try {
-      await login(email, password);
-      navigate('/dashboard');
+      await login(trimmedEmail, password);
+      setSuccess('Signed in successfully. Opening intelligence workspace...');
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed.');
     } finally {
@@ -97,6 +113,7 @@ export function LoginPage() {
   };
 
   const quickFill = (role: 'admin' | 'user') => {
+    setError(null);
     if (role === 'admin') {
       setEmail('admin@truthlens.ai');
       setPassword('AdminTruth2026!');
@@ -111,10 +128,19 @@ export function LoginPage() {
       title="Sign in to TruthLens AI"
       subtitle="Access the intelligence center, explainable ML diagnostics, and analysis history."
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         {error && (
-          <div className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]">
+          <div
+            role="alert"
+            className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]"
+          >
             {error}
+          </div>
+        )}
+        {success && (
+          <div className="p-3 rounded-xl bg-[#C6FF4D]/10 border border-[#C6FF4D]/30 text-xs text-[#C6FF4D] flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{success}</span>
           </div>
         )}
 
@@ -125,8 +151,12 @@ export function LoginPage() {
           <input
             type="email"
             required
+            autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError(null);
+            }}
             className="w-full bg-[#080B12] border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-[#F3F5F7] focus:outline-none focus:border-[#28DFFF]"
             placeholder="you@domain.com"
           />
@@ -142,8 +172,12 @@ export function LoginPage() {
           <input
             type="password"
             required
+            autoComplete="current-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError(null);
+            }}
             className="w-full bg-[#080B12] border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-[#F3F5F7] focus:outline-none focus:border-[#28DFFF]"
             placeholder="••••••••"
           />
@@ -198,15 +232,35 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
+
+    const trimmedName = fullName.trim();
+    const trimmedEmail = email.trim();
+
+    if (trimmedName.length < 2) {
+      setError('Full name must be at least 2 characters long.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
     setLoading(true);
     try {
-      await register(fullName, email, password);
-      navigate('/dashboard');
+      await register(trimmedName, trimmedEmail, password);
+      setSuccess('Account created successfully. Opening workspace...');
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed.');
     } finally {
@@ -219,10 +273,19 @@ export function RegisterPage() {
       title="Create TruthLens Account"
       subtitle="Register to verify news claims, inspect feature attribution, and export PDF dossiers."
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         {error && (
-          <div className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]">
+          <div
+            role="alert"
+            className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]"
+          >
             {error}
+          </div>
+        )}
+        {success && (
+          <div className="p-3 rounded-xl bg-[#C6FF4D]/10 border border-[#C6FF4D]/30 text-xs text-[#C6FF4D] flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{success}</span>
           </div>
         )}
 
@@ -231,8 +294,12 @@ export function RegisterPage() {
           <input
             type="text"
             required
+            autoComplete="name"
             value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            onChange={(e) => {
+              setFullName(e.target.value);
+              if (error) setError(null);
+            }}
             className="w-full bg-[#080B12] border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-[#F3F5F7] focus:outline-none focus:border-[#28DFFF]"
             placeholder="Alex Rivera"
           />
@@ -245,8 +312,12 @@ export function RegisterPage() {
           <input
             type="email"
             required
+            autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError(null);
+            }}
             className="w-full bg-[#080B12] border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-[#F3F5F7] focus:outline-none focus:border-[#28DFFF]"
             placeholder="you@domain.com"
           />
@@ -260,8 +331,12 @@ export function RegisterPage() {
             type="password"
             required
             minLength={8}
+            autoComplete="new-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError(null);
+            }}
             className="w-full bg-[#080B12] border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-[#F3F5F7] focus:outline-none focus:border-[#28DFFF]"
             placeholder="••••••••"
           />
@@ -298,13 +373,18 @@ export function ForgotPasswordPage() {
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setMessage(null);
+    if (!EMAIL_REGEX.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await apiRequest<{ message: string; dev_reset_token?: string }>(
         '/api/auth/forgot-password',
         {
           method: 'POST',
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email: email.trim().toLowerCase() }),
         }
       );
       setMessage(res.message);
@@ -322,11 +402,15 @@ export function ForgotPasswordPage() {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters long.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await apiRequest<{ message: string }>('/api/auth/reset-password', {
         method: 'POST',
-        body: JSON.stringify({ token: tokenInput, new_password: newPassword }),
+        body: JSON.stringify({ token: tokenInput.trim(), new_password: newPassword }),
       });
       setMessage(res.message);
     } catch (err) {
@@ -347,13 +431,16 @@ export function ForgotPasswordPage() {
         </div>
       )}
       {error && (
-        <div className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]">
+        <div
+          role="alert"
+          className="p-3 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]"
+        >
           {error}
         </div>
       )}
 
       {step === 'request' ? (
-        <form onSubmit={handleRequest} className="space-y-4">
+        <form onSubmit={handleRequest} noValidate className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-[#F3F5F7]/90 mb-1.5">
               Account Email
@@ -375,7 +462,7 @@ export function ForgotPasswordPage() {
           </button>
         </form>
       ) : (
-        <form onSubmit={handleReset} className="space-y-4">
+        <form onSubmit={handleReset} noValidate className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-[#F3F5F7]/90 mb-1.5">
               Reset Token

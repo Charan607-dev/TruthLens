@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiRequest, getStoredToken, setStoredToken } from '../lib/api';
+import { ApiError, apiRequest, getStoredToken, setStoredToken } from '../lib/api';
 import { User } from '../types';
 
 interface AuthContextValue {
@@ -27,10 +27,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       const res = await apiRequest<{ user: User }>('/api/auth/me');
-      setUser(res.user);
-    } catch {
-      setStoredToken(null);
-      setUser(null);
+      if (res && res.user && res.user.id) {
+        setUser(res.user);
+      } else {
+        setStoredToken(null);
+        setUser(null);
+      }
+    } catch (err) {
+      // Only clear stored session on explicit 401/403 authentication rejections
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        setStoredToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -43,8 +51,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     const res = await apiRequest<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+      }),
     });
+    if (!res?.token || !res?.user?.id) {
+      throw new Error('Authentication succeeded without a valid session token.');
+    }
     setStoredToken(res.token);
     setUser(res.user);
     return res.user;
@@ -53,8 +67,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (fullName: string, email: string, password: string) => {
     const res = await apiRequest<{ token: string; user: User }>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ full_name: fullName, email, password }),
+      body: JSON.stringify({
+        full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      }),
     });
+    if (!res?.token || !res?.user?.id) {
+      throw new Error('Registration response did not include a valid session token.');
+    }
     setStoredToken(res.token);
     setUser(res.user);
     return res.user;

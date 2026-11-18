@@ -124,6 +124,16 @@ async function startServer() {
     next();
   });
 
+  // Secret-free structured logging for /api requests
+  app.use('/api', (req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const elapsed = Date.now() - start;
+      console.log(`[API] ${req.method} ${req.originalUrl.split('?')[0]} -> ${res.statusCode} (${elapsed}ms)`);
+    });
+    next();
+  });
+
   // Health endpoint
   app.get('/api/health', (_req, res) => {
     const activeModel = db
@@ -1126,8 +1136,16 @@ async function startServer() {
     });
   });
 
-  // JSON error handler
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  // Unmatched /api routes always return JSON 404 (never HTML)
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
+  // JSON error handler (including malformed JSON bodies)
+  app.use((err: Error & { type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+    if (err?.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'Invalid JSON request payload.' });
+    }
     res.status(400).json({ error: err.message || 'Unexpected server error.' });
   });
 
@@ -1140,10 +1158,21 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (_req, res) => {
+        res.sendFile(indexPath);
+      });
+    } else {
+      app.get('*', (_req, res) => {
+        res.json({
+          service: 'TruthLens AI Backend API',
+          status: 'running',
+          health: '/api/health',
+        });
+      });
+    }
   }
 
   const PORT = Number(process.env.PORT) || 3000;

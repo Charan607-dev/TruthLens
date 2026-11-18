@@ -80,7 +80,15 @@ export function AnalyzerPage() {
   useEffect(() => {
     apiRequest<ModelInfoStatus>('/api/model/info')
       .then(setModelInfo)
-      .catch(() => setModelInfo({ trained: false, message: 'Unable to check active model.' }));
+      .catch((err) =>
+        setModelInfo({
+          trained: false,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Unable to reach TruthLens ML backend to verify model status.',
+        })
+      );
   }, []);
 
   const handlePaste = async () => {
@@ -104,11 +112,16 @@ export function AnalyzerPage() {
     setError(null);
     setResult(null);
     setUrlPreview(null);
+    const trimmedUrl = urlInput.trim();
+    if (!trimmedUrl) {
+      setError('Please enter a public http:// or https:// news article URL.');
+      return;
+    }
     setExtractingUrl(true);
     try {
       const data = await apiRequest<ExtractedUrlPreview>('/api/analyze-url', {
         method: 'POST',
-        body: JSON.stringify({ url: urlInput, preview_only: true }),
+        body: JSON.stringify({ url: trimmedUrl, preview_only: true }),
       });
       setUrlPreview(data);
     } catch (err) {
@@ -125,16 +138,28 @@ export function AnalyzerPage() {
 
     if (modelInfo && !modelInfo.trained) {
       setError(
-        'Model not trained. Predictions are disabled until an administrator activates a trained model.'
+        modelInfo.message ||
+          'Model not trained or backend unreachable. Predictions are disabled until an active trained model responds.'
       );
+      return;
+    }
+
+    if (mode === 'headline' && headline.trim().length < 12) {
+      setError('Headline must be at least 12 characters long for reliable classification.');
+      return;
+    }
+    if (mode === 'article' && articleText.trim().length < 40) {
+      setError('Complete article text must be at least 40 characters long.');
+      return;
+    }
+    if (mode === 'url' && !urlPreview && !urlInput.trim()) {
+      setError('Enter a valid public news URL or fetch article preview before analysing.');
       return;
     }
 
     setAnalyzing(true);
     setActiveStep(0);
 
-    // Advance intermediate steps while the real backend request is in flight,
-    // holding on step 3 until the API promise actually settles.
     const t1 = window.setTimeout(() => setActiveStep((s) => Math.max(s, 1)), 120);
     const t2 = window.setTimeout(() => setActiveStep((s) => Math.max(s, 2)), 260);
     const t3 = window.setTimeout(() => setActiveStep((s) => Math.max(s, 3)), 420);
@@ -142,22 +167,32 @@ export function AnalyzerPage() {
     try {
       let data: AnalysisResponse;
       if (mode === 'url') {
-        if (!urlPreview) {
-          throw new Error('Fetch and inspect the URL content before running analysis.');
+        if (urlPreview && urlPreview.extracted.url === urlInput.trim()) {
+          data = await apiRequest<AnalysisResponse>('/api/analyze', {
+            method: 'POST',
+            body: JSON.stringify({
+              mode: 'url',
+              headline: urlPreview.extracted.title,
+              article_text: urlPreview.extracted.body,
+              source_url: urlPreview.extracted.url,
+              author: urlPreview.extracted.author,
+              published_date: urlPreview.extracted.published_date,
+              uncertainty_threshold: threshold,
+              run_fact_check: runFactCheck,
+            }),
+          });
+        } else {
+          // Allow direct 1-click URL extraction + classification via /api/analyze-url
+          data = await apiRequest<AnalysisResponse>('/api/analyze-url', {
+            method: 'POST',
+            body: JSON.stringify({
+              url: urlInput.trim(),
+              preview_only: false,
+              uncertainty_threshold: threshold,
+              run_fact_check: runFactCheck,
+            }),
+          });
         }
-        data = await apiRequest<AnalysisResponse>('/api/analyze', {
-          method: 'POST',
-          body: JSON.stringify({
-            mode: 'url',
-            headline: urlPreview.extracted.title,
-            article_text: urlPreview.extracted.body,
-            source_url: urlPreview.extracted.url,
-            author: urlPreview.extracted.author,
-            published_date: urlPreview.extracted.published_date,
-            uncertainty_threshold: threshold,
-            run_fact_check: runFactCheck,
-          }),
-        });
       } else {
         data = await apiRequest<AnalysisResponse>('/api/analyze', {
           method: 'POST',
@@ -209,7 +244,7 @@ export function AnalyzerPage() {
                   {modelInfo.version})
                 </span>
               ) : (
-                <span className="text-[#FF647C]">Model not trained</span>
+                <span className="text-[#FF647C]">Model unavailable</span>
               )}
             </div>
           )}
@@ -219,7 +254,7 @@ export function AnalyzerPage() {
           <div className="p-4 rounded-xl bg-[#FF647C]/10 border border-[#FF647C]/30 flex items-start gap-3 text-sm text-[#FFB3BF]">
             <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">Model not trained</p>
+              <p className="font-semibold">Backend / Model Status Notice</p>
               <p className="text-xs opacity-85 mt-0.5">
                 {modelInfo.message ||
                   'Production predictions are disabled until an administrator trains and activates a model.'}
@@ -267,21 +302,27 @@ export function AnalyzerPage() {
         <div className="bg-[#101522]/90 border border-white/12 rounded-2xl p-6 sm:p-7 space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
           {mode === 'url' && (
             <div className="space-y-5">
-              <form onSubmit={handleExtractUrl} className="flex flex-col sm:flex-row gap-3">
+              <form onSubmit={handleExtractUrl} noValidate className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
                   <Link2 className="w-4 h-4 text-[#28DFFF] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="url"
                     required
                     value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
+                    onChange={(e) => {
+                      setUrlInput(e.target.value);
+                      if (urlPreview && e.target.value.trim() !== urlPreview.extracted.url) {
+                        setUrlPreview(null);
+                      }
+                      if (error) setError(null);
+                    }}
                     placeholder="https://www.reuters.com/world/..."
                     className="w-full bg-[#080B12] border border-white/15 rounded-xl pl-11 pr-4 py-3 text-sm text-[#F3F5F7] placeholder:text-[#929BAD]/60 focus:outline-none focus:border-[#28DFFF] transition-colors"
                   />
                 </div>
                 <button
                   type="submit"
-                  disabled={extractingUrl}
+                  disabled={extractingUrl || !urlInput.trim()}
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 text-xs font-semibold bg-[#161D2B] hover:bg-white/10 text-[#F3F5F7] border border-white/15 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
                 >
                   {extractingUrl ? (
@@ -320,7 +361,7 @@ export function AnalyzerPage() {
             </div>
           )}
 
-          <form onSubmit={handleAnalyze} className="space-y-5">
+          <form onSubmit={handleAnalyze} noValidate className="space-y-5">
             {mode === 'headline' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -335,7 +376,10 @@ export function AnalyzerPage() {
                   type="text"
                   required
                   value={headline}
-                  onChange={(e) => setHeadline(e.target.value)}
+                  onChange={(e) => {
+                    setHeadline(e.target.value);
+                    if (error) setError(null);
+                  }}
                   placeholder="Enter a news headline (e.g., NASA Apollo 11 astronauts landed on the Moon on July 20, 1969)..."
                   className="w-full bg-[#080B12] border border-white/15 rounded-xl px-4 py-4 text-base sm:text-lg font-display text-[#F3F5F7] placeholder:text-[#929BAD]/55 focus:outline-none focus:border-[#28DFFF] focus:ring-2 focus:ring-[#28DFFF]/20 transition-all"
                 />
@@ -385,7 +429,10 @@ export function AnalyzerPage() {
                     rows={8}
                     required
                     value={articleText}
-                    onChange={(e) => setArticleText(e.target.value)}
+                    onChange={(e) => {
+                      setArticleText(e.target.value);
+                      if (error) setError(null);
+                    }}
                     placeholder="Paste the complete article body here (minimum 40 characters)..."
                     className="w-full bg-[#080B12] border border-white/15 rounded-xl p-4 text-sm text-[#F3F5F7] placeholder:text-[#929BAD]/60 focus:outline-none focus:border-[#28DFFF] focus:ring-2 focus:ring-[#28DFFF]/20 transition-all"
                   />
@@ -454,7 +501,7 @@ export function AnalyzerPage() {
                 disabled={
                   analyzing ||
                   (modelInfo !== null && !modelInfo.trained) ||
-                  (mode === 'url' && !urlPreview)
+                  (mode === 'url' && !urlPreview && !urlInput.trim())
                 }
                 className="inline-flex items-center justify-center gap-2 px-6 py-3 text-xs sm:text-sm font-semibold text-[#080B12] bg-[#C6FF4D] hover:bg-[#D5FF75] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
               >
@@ -467,7 +514,11 @@ export function AnalyzerPage() {
                   <>
                     <ScanSearch className="w-4 h-4" />
                     <span>
-                      {mode === 'url' ? 'Analyse Extracted Content' : 'Analyse News'}
+                      {mode === 'url'
+                        ? urlPreview
+                          ? 'Analyse Extracted Content'
+                          : 'Fetch & Analyse URL'
+                        : 'Analyse News'}
                     </span>
                   </>
                 )}
@@ -476,7 +527,10 @@ export function AnalyzerPage() {
           </form>
 
           {error && (
-            <div className="p-3.5 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]">
+            <div
+              role="alert"
+              className="p-3.5 rounded-xl bg-[#FF647C]/12 border border-[#FF647C]/30 text-xs text-[#FFB3BF]"
+            >
               {error}
             </div>
           )}
