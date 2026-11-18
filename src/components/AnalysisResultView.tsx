@@ -19,6 +19,11 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
 import { generateAnalysisPdfReport } from '../lib/pdfExport';
+import {
+  formatProbabilityPct,
+  formatRawProbabilityPct,
+  formatThresholdPct,
+} from '../lib/probability';
 import { AnalysisResponse } from '../types';
 import { ConfidenceGauge } from './ConfidenceGauge';
 import { HighlightedText } from './HighlightedText';
@@ -38,6 +43,10 @@ export function AnalysisResultView({ analysis }: Props) {
   const [feedbackStatus, setFeedbackStatus] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const { ml_result: ml, source_credibility: source } = analysis;
+  const rawProbReal = ml.decision_debug?.prob_real_raw ?? ml.prob_real;
+  const rawProbFake = ml.decision_debug?.prob_fake_raw ?? ml.prob_fake;
+  const rawComparedProb = ml.decision_debug?.compared_probability_raw ?? Math.max(rawProbReal, rawProbFake);
+  const rawThreshold = ml.decision_debug?.threshold_raw ?? ml.uncertainty_threshold;
   const refs = analysis.fact_check?.references || analysis.verification_sources || [];
   const factCheckReason = analysis.fact_check?.reason;
   const extractedClaims = analysis.fact_check?.extracted_claims || [];
@@ -125,7 +134,7 @@ export function AnalysisResultView({ analysis }: Props) {
               <span aria-hidden="true">·</span>
               <span>{ml.model_version}</span>
               <span aria-hidden="true">·</span>
-              <span>Threshold {(ml.uncertainty_threshold * 100).toFixed(0)}%</span>
+              <span>Threshold {formatThresholdPct(rawThreshold)}</span>
               <span aria-hidden="true">·</span>
               <span>{new Date(analysis.created_at).toLocaleString()}</span>
             </div>
@@ -147,32 +156,47 @@ export function AnalysisResultView({ analysis }: Props) {
         {/* Confidence Gauge + Probability Breakdown */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center pt-6">
           <div className="md:col-span-4 lg:col-span-3 flex justify-center md:justify-start">
-            <ConfidenceGauge confidence={ml.confidence} prediction={ml.prediction} size={156} />
+            <ConfidenceGauge
+              confidence={rawComparedProb}
+              prediction={ml.prediction}
+              threshold={rawThreshold}
+              size={156}
+            />
           </div>
 
           <div className="md:col-span-8 lg:col-span-9 space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
                 <span className="text-[#C6FF4D]">
-                  REAL Class Probability: {(ml.prob_real * 100).toFixed(1)}%
+                  REAL Class Probability: {formatProbabilityPct(rawProbReal, rawThreshold)}
                 </span>
                 <span className="text-[#FF647C]">
-                  FAKE Class Probability: {(ml.prob_fake * 100).toFixed(1)}%
+                  FAKE Class Probability: {formatProbabilityPct(rawProbFake, rawThreshold)}
                 </span>
               </div>
               <div className="h-3 w-full bg-[#080B12] rounded-full overflow-hidden flex border border-white/10 p-0.5">
                 <motion.div
                   initial={reducedMotion ? false : { width: 0 }}
-                  animate={{ width: `${(ml.prob_real * 100).toFixed(1)}%` }}
+                  animate={{ width: `${(rawProbReal * 100).toFixed(4)}%` }}
                   transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
                   className="bg-[#C6FF4D] rounded-l-full"
                 />
                 <motion.div
                   initial={reducedMotion ? false : { width: 0 }}
-                  animate={{ width: `${(ml.prob_fake * 100).toFixed(1)}%` }}
+                  animate={{ width: `${(rawProbFake * 100).toFixed(4)}%` }}
                   transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
                   className="bg-[#FF647C] rounded-r-full"
                 />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-[#929BAD] bg-[#080B12]/65 border border-white/8 rounded-lg px-3 py-1.5">
+                <span>
+                  Unrounded: P(REAL)={formatRawProbabilityPct(rawProbReal)} · P(FAKE)={formatRawProbabilityPct(rawProbFake)}
+                </span>
+                <span>
+                  Threshold Check: {formatRawProbabilityPct(rawComparedProb)}{' '}
+                  {ml.prediction === 'UNCERTAIN' ? '<' : '>='}{' '}
+                  {formatThresholdPct(rawThreshold)} → <strong className="text-[#F3F5F7]">{ml.prediction}</strong>
+                </span>
               </div>
             </div>
 

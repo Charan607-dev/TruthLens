@@ -111,6 +111,13 @@ export interface PredictionResult {
   all_matched_terms: Array<{ term: string; direction: 'fake' | 'real'; contribution: number }>;
   explanation_summary: string;
   limitations: string[];
+  decision_debug?: {
+    prob_real_raw: number;
+    prob_fake_raw: number;
+    compared_probability_raw: number;
+    threshold_raw: number;
+    rule_applied: string;
+  };
 }
 
 const ENGLISH_STOPWORDS = new Set([
@@ -910,6 +917,80 @@ export function loadModelArtifact(artifactPath: string): TrainedModelArtifact {
   return JSON.parse(raw) as TrainedModelArtifact;
 }
 
+const THRESHOLD_BOUNDARY_EPS = 1e-12;
+
+export function classifyProbabilityWithThreshold(
+  probReal: number,
+  probFake: number,
+  uncertaintyThreshold: number,
+  insufficientFeatures = false
+): {
+  prediction: 'REAL' | 'FAKE' | 'UNCERTAIN';
+  raw_label: 'REAL' | 'FAKE';
+  compared_probability: number;
+  normalized_threshold: number;
+  rule_applied: 'REAL >= threshold' | 'FAKE >= threshold' | 'BELOW_THRESHOLD' | 'INSUFFICIENT_FEATURES';
+} {
+  const normalized_threshold = Math.min(
+    0.95,
+    Math.max(0.5, Math.round(Number(uncertaintyThreshold) * 10000) / 10000)
+  );
+  const raw_label: 'REAL' | 'FAKE' = probFake >= 0.5 ? 'FAKE' : 'REAL';
+  const compared_probability = Math.max(probReal, probFake);
+
+  if (insufficientFeatures) {
+    return {
+      prediction: 'UNCERTAIN',
+      raw_label,
+      compared_probability,
+      normalized_threshold,
+      rule_applied: 'INSUFFICIENT_FEATURES',
+    };
+  }
+
+  if (probReal + THRESHOLD_BOUNDARY_EPS >= normalized_threshold && probReal >= probFake) {
+    return {
+      prediction: 'REAL',
+      raw_label,
+      compared_probability,
+      normalized_threshold,
+      rule_applied: 'REAL >= threshold',
+    };
+  }
+
+  if (probFake + THRESHOLD_BOUNDARY_EPS >= normalized_threshold && probFake > probReal) {
+    return {
+      prediction: 'FAKE',
+      raw_label,
+      compared_probability,
+      normalized_threshold,
+      rule_applied: 'FAKE >= threshold',
+    };
+  }
+
+  return {
+    prediction: 'UNCERTAIN',
+    raw_label,
+    compared_probability,
+    normalized_threshold,
+    rule_applied: 'BELOW_THRESHOLD',
+  };
+}
+
+function formatBoundarySafePct(prob: number, threshold: number): string {
+  const pct = prob * 100;
+  const threshPct = threshold * 100;
+  if (prob + THRESHOLD_BOUNDARY_EPS < threshold && Number(pct.toFixed(1)) >= Number(threshPct.toFixed(1))) {
+    for (const decimals of [2, 3, 4]) {
+      if (Number(pct.toFixed(decimals)) < threshPct) {
+        return `${pct.toFixed(decimals)}%`;
+      }
+    }
+    return `${pct.toFixed(4)}%`;
+  }
+  return `${pct.toFixed(1)}%`;
+}
+
 export function predictWithExplanation(
   text: string,
   artifact: TrainedModelArtifact,
@@ -927,16 +1008,25 @@ export function predictWithExplanation(
   const matchedCount = vec.length;
   const probFake = predictProbabilityFromArtifact(vec, artifact);
   const probReal = 1 - probFake;
-  const raw_label: 'REAL' | 'FAKE' = probFake >= 0.5 ? 'FAKE' : 'REAL';
-  const winningConfidence = Math.max(probFake, probReal);
 
   const uniqueUnigrams = new Set(tokens.filter((t) => !t.includes(' '))).size;
   const matchedUnigrams = vec.filter(([idx]) => !invVocab[idx]?.includes(' ')).length;
   const vocabulary_coverage = uniqueUnigrams > 0 ? matchedUnigrams / uniqueUnigrams : 0;
 
   const isInsufficientTokens = matchedCount < 2 || tokens.length < 3;
-  const prediction: 'REAL' | 'FAKE' | 'UNCERTAIN' =
-    isInsufficientTokens || winningConfidence < uncertaintyThreshold ? 'UNCERTAIN' : raw_label;
+  const decision = classifyProbabilityWithThreshold(
+    probReal,
+    probFake,
+    uncertaintyThreshold,
+    isInsufficientTokens
+  );
+  const {
+    prediction,
+    raw_label,
+    compared_probability: winningConfidence,
+    normalized_threshold: cleanThreshold,
+    rule_applied,
+  } = decision;
 
   // Genuine feature-level attribution (no fabricated explanations)
   const contributions: FeatureContribution[] = [];
@@ -977,21 +1067,28 @@ export function predictWithExplanation(
     .slice(0, 24)
     .map((c) => ({ term: c.term, direction: c.direction, contribution: c.contribution }));
 
+  const threshPctLabel = Number.isInteger(cleanThreshold * 100)
+    ? `${(cleanThreshold * 100).toFixed(0)}%`
+    : `${Number((cleanThreshold * 100).toFixed(2))}%`;
+
   let explanation_summary = '';
   if (isInsufficientTokens) {
     explanation_summary =
       `Only ${matchedCount} recognized vocabulary term(s) matched the active model (${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage). Input length is insufficient for reliable statistical classification, so it is classified as UNCERTAIN.`;
   } else if (prediction === 'UNCERTAIN') {
+    const exactWinLabel = formatBoundarySafePct(winningConfidence, cleanThreshold);
+    const exactRealLabel = formatBoundarySafePct(probReal, cleanThreshold);
+    const exactFakeLabel = formatBoundarySafePct(probFake, cleanThreshold);
     explanation_summary =
-      `Model probability (${(winningConfidence * 100).toFixed(1)}%) falls below the configured ${(uncertaintyThreshold * 100).toFixed(0)}% confidence threshold across ${matchedCount} matched features (${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage). Both misinformation-correlated and institutional-reporting signals were detected without a decisive margin.`;
+      `Exact winning probability (${exactWinLabel}; REAL ${exactRealLabel} vs FAKE ${exactFakeLabel}) falls below the configured ${threshPctLabel} confidence threshold across ${matchedCount} matched features (${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage). Both misinformation-correlated and institutional-reporting signals were detected without meeting the ${threshPctLabel} threshold.`;
   } else if (prediction === 'FAKE') {
     const terms = top_fake_features.slice(0, 4).map((f) => `"${f.term}"`).join(', ');
     explanation_summary =
-      `The active ${artifact.model_name} classifier assigned a ${(probFake * 100).toFixed(1)}% statistical score toward the FAKE training class (${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage), driven primarily by phrasing such as ${terms || 'misinformation-correlated patterns'} learned from the training dataset.`;
+      `The active ${artifact.model_name} classifier assigned a ${formatBoundarySafePct(probFake, cleanThreshold)} statistical score toward the FAKE training class (meeting the ${threshPctLabel} threshold; ${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage), driven primarily by phrasing such as ${terms || 'misinformation-correlated patterns'} learned from the training dataset.`;
   } else {
     const terms = top_real_features.slice(0, 4).map((f) => `"${f.term}"`).join(', ');
     explanation_summary =
-      `The active ${artifact.model_name} classifier assigned a ${(probReal * 100).toFixed(1)}% statistical score toward the REAL training class (${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage), driven by reporting patterns such as ${terms || 'standard journalistic terms'} learned from the training dataset.`;
+      `The active ${artifact.model_name} classifier assigned a ${formatBoundarySafePct(probReal, cleanThreshold)} statistical score toward the REAL training class (meeting the ${threshPctLabel} threshold; ${(vocabulary_coverage * 100).toFixed(0)}% unigram coverage), driven by reporting patterns such as ${terms || 'standard journalistic terms'} learned from the training dataset.`;
   }
 
   const limitations = [
@@ -1006,7 +1103,7 @@ export function predictWithExplanation(
     confidence: winningConfidence,
     prob_fake: probFake,
     prob_real: probReal,
-    uncertainty_threshold: uncertaintyThreshold,
+    uncertainty_threshold: cleanThreshold,
     model_name: artifact.model_name,
     model_version: artifact.version,
     algorithm: artifact.algorithm,
@@ -1018,5 +1115,12 @@ export function predictWithExplanation(
     all_matched_terms,
     explanation_summary,
     limitations,
+    decision_debug: {
+      prob_real_raw: probReal,
+      prob_fake_raw: probFake,
+      compared_probability_raw: winningConfidence,
+      threshold_raw: cleanThreshold,
+      rule_applied,
+    },
   };
 }

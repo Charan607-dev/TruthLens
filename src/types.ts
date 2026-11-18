@@ -32,6 +32,13 @@ export interface MlPredictionResult {
   all_matched_terms: Array<{ term: string; direction: 'fake' | 'real'; contribution: number }>;
   explanation_summary: string;
   limitations: string[];
+  decision_debug?: {
+    prob_real_raw: number;
+    prob_fake_raw: number;
+    compared_probability_raw: number;
+    threshold_raw: number;
+    rule_applied: string;
+  };
 }
 
 export interface SourceCredibilityReport {

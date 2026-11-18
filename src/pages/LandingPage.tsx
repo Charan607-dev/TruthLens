@@ -19,6 +19,7 @@ import { HeroIntelligenceVisual } from '../components/HeroIntelligenceVisual';
 import { PredictionBadge } from '../components/PredictionBadge';
 import { useAuth } from '../context/AuthContext';
 import { apiRequest } from '../lib/api';
+import { formatProbabilityPct } from '../lib/probability';
 import { MlPredictionResult } from '../types';
 
 interface PublicModelRow {
@@ -331,6 +332,7 @@ export function LandingPage() {
                   <ConfidenceGauge
                     confidence={demoResult.confidence}
                     prediction={demoResult.prediction}
+                    threshold={demoResult.uncertainty_threshold}
                     size={122}
                   />
                 </div>
@@ -338,19 +340,19 @@ export function LandingPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs font-mono">
                     <span className="text-[#C6FF4D]">
-                      REAL {(demoResult.prob_real * 100).toFixed(1)}%
+                      REAL {formatProbabilityPct(demoResult.prob_real, demoResult.uncertainty_threshold)}
                     </span>
                     <span className="text-[#FF647C]">
-                      FAKE {(demoResult.prob_fake * 100).toFixed(1)}%
+                      FAKE {formatProbabilityPct(demoResult.prob_fake, demoResult.uncertainty_threshold)}
                     </span>
                   </div>
                   <div className="h-2 bg-[#080B12] rounded-full overflow-hidden flex border border-white/10">
                     <div
-                      style={{ width: `${(demoResult.prob_real * 100).toFixed(1)}%` }}
+                      style={{ width: `${(demoResult.prob_real * 100).toFixed(4)}%` }}
                       className="bg-[#C6FF4D] transition-all duration-500"
                     />
                     <div
-                      style={{ width: `${(demoResult.prob_fake * 100).toFixed(1)}%` }}
+                      style={{ width: `${(demoResult.prob_fake * 100).toFixed(4)}%` }}
                       className="bg-[#FF647C] transition-all duration-500"
                     />
                   </div>

@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { formatProbabilityPct, formatThresholdPct } from './probability';
 import { AnalysisResponse } from '../types';
 
 export function generateAnalysisPdfReport(analysis: AnalysisResponse) {
@@ -50,14 +51,14 @@ export function generateAnalysisPdfReport(analysis: AnalysisResponse) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.text(
-    `Calibrated Confidence: ${(analysis.ml_result.confidence * 100).toFixed(1)}%   |   P(Fake): ${(analysis.ml_result.prob_fake * 100).toFixed(1)}%   |   P(Real): ${(analysis.ml_result.prob_real * 100).toFixed(1)}%`,
+    `Calibrated Confidence: ${formatProbabilityPct(analysis.ml_result.confidence, analysis.ml_result.uncertainty_threshold)}   |   P(Fake): ${formatProbabilityPct(analysis.ml_result.prob_fake, analysis.ml_result.uncertainty_threshold)}   |   P(Real): ${formatProbabilityPct(analysis.ml_result.prob_real, analysis.ml_result.uncertainty_threshold)}`,
     margin + 16,
     y + 46
   );
   doc.setFontSize(9.5);
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `Model: ${analysis.ml_result.model_name} (${analysis.ml_result.model_version})   |   Threshold: ${(analysis.ml_result.uncertainty_threshold * 100).toFixed(0)}%`,
+    `Model: ${analysis.ml_result.model_name} (${analysis.ml_result.model_version})   |   Threshold: ${formatThresholdPct(analysis.ml_result.uncertainty_threshold)}`,
     margin + 16,
     y + 62
   );

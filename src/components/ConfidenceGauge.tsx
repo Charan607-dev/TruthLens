@@ -1,14 +1,17 @@
 import { motion, useReducedMotion } from 'motion/react';
+import { formatProbabilityPct } from '../lib/probability';
 
 interface Props {
   confidence: number; // 0..1
   prediction: 'REAL' | 'FAKE' | 'UNCERTAIN';
+  threshold?: number;
   size?: number;
 }
 
-export function ConfidenceGauge({ confidence, prediction, size = 152 }: Props) {
+export function ConfidenceGauge({ confidence, prediction, threshold, size = 152 }: Props) {
   const reducedMotion = useReducedMotion();
   const pct = Math.max(0, Math.min(100, confidence * 100));
+  const formattedPct = formatProbabilityPct(confidence, threshold);
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -45,7 +48,7 @@ export function ConfidenceGauge({ confidence, prediction, size = 152 }: Props) {
         height={size}
         viewBox={`0 0 ${size} ${size}`}
         className="-rotate-90"
-        aria-label={`Model confidence ${pct.toFixed(1)} percent`}
+        aria-label={`Model confidence ${formattedPct}`}
       >
         <defs>
           <filter id={`gauge-glow-${prediction}`} x="-20%" y="-20%" width="140%" height="140%">
@@ -79,7 +82,7 @@ export function ConfidenceGauge({ confidence, prediction, size = 152 }: Props) {
 
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         <span className="text-3xl font-mono font-bold tabular-nums text-[#F3F5F7]">
-          {pct.toFixed(1)}%
+          {formattedPct}
         </span>
         <span className={`text-[11px] font-mono uppercase tracking-wider mt-0.5 ${palette.labelColor}`}>
           Confidence

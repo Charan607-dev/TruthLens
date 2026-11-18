@@ -16,6 +16,7 @@ import { HighlightedText } from '../components/HighlightedText';
 import { PredictionBadge } from '../components/PredictionBadge';
 import { WorkspaceLayout } from '../components/WorkspaceLayout';
 import { apiRequest } from '../lib/api';
+import { formatProbabilityPct, formatRawProbabilityPct } from '../lib/probability';
 import { AnalysisResponse, HistoryItem } from '../types';
 
 export function ExplainabilityPage() {
@@ -158,13 +159,19 @@ export function ExplainabilityPage() {
                 <div className="p-3 rounded-xl bg-[#080B12]/70 border border-white/8">
                   <span className="text-[#929BAD] block">REAL Probability</span>
                   <span className="font-mono text-lg font-bold text-[#C6FF4D]">
-                    {(ml.prob_real * 100).toFixed(1)}%
+                    {formatProbabilityPct(ml.prob_real, ml.uncertainty_threshold)}
+                  </span>
+                  <span className="block text-[10px] font-mono text-[#929BAD]">
+                    Raw: {formatRawProbabilityPct(ml.prob_real)}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-[#080B12]/70 border border-white/8">
                   <span className="text-[#929BAD] block">FAKE Probability</span>
                   <span className="font-mono text-lg font-bold text-[#FF647C]">
-                    {(ml.prob_fake * 100).toFixed(1)}%
+                    {formatProbabilityPct(ml.prob_fake, ml.uncertainty_threshold)}
+                  </span>
+                  <span className="block text-[10px] font-mono text-[#929BAD]">
+                    Raw: {formatRawProbabilityPct(ml.prob_fake)}
                   </span>
                 </div>
               </div>
